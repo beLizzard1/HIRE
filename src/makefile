@@ -1,13 +1,13 @@
-CC=gcc
+CC=gcc -ansi
 CUDACC=nvcc
 
 Objs=main.o fftcuda.o tiffmanager.o
 
 BinaryName=gpuholography
 
-CFLAGS=-O2 -g -Wall -Werror -pedantic -Wextra
-LDFLAGS=-Wall -Werror -pedantic -Wextra
-
+CFLAGS=-O2 -g -Wall -Werror -Wextra -I. -I/usr/local/cuda/include -lcudart -ltiff -lm
+LDFLAGS=-Wall -O2 -g -L/usr/local/lib -L/usr/local/cuda/lib64 -lcudart -lcudart -lcuda -lm -ltiff
+CUDACCFLAGS=-O2 -g -I. -I/usr/local/cuda/include
 
 
 all: $(Objs) $(BinaryName)
@@ -19,7 +19,7 @@ all: $(Objs) $(BinaryName)
 	$(CUDACC) $(CUDACCFLAGS) -c $<
 
 $(BinaryName):
-	$(CC) -o $(BinaryName) $(LDFLAGS) $(Objs)
+	g++ -o $(BinaryName) $(Objs) $(LDFLAGS)
 
 clean:
 	rm -f $(Objs) $(BinaryName)
