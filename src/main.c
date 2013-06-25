@@ -4,7 +4,7 @@
 #include <cuda.h>
 #include <tiffio.h>
 
-#include <tiffmanager.h>
+#include <datamanager.h>
 
 int main(int argc, char **argv){
 
@@ -30,8 +30,6 @@ int main(int argc, char **argv){
 		return(1);
 	}
 
-
-	TIFFSetDirectory(image,0);
 
 
 	TIFFClose(image);

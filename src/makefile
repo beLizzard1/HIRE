@@ -1,7 +1,7 @@
 CC=gcc -ansi
 CUDACC=nvcc
 
-Objs=main.o fftcuda.o tiffmanager.o
+Objs=main.o fftcuda.o datamanager.o
 
 BinaryName=gpuholography
 
