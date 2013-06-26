@@ -1,6 +1,3 @@
-extern "C" int CUDAFFT(){
-
-
-	return(0);
-
-}
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
