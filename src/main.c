@@ -41,6 +41,9 @@ int main(int argc, char **argv){
 
 	/* Now we have the two separate arrays loaded into the Host memory */
 
+	image1 = image1;
+	image2 = image2;
+
 
 return(0);	
 }

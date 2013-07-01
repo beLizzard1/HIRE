@@ -40,3 +40,39 @@ int freedoublematrix(double **mat, unsigned int cols){
 free(mat);
 return(0);
 }
+
+
+int splittingdoublematrix(double **mat, double ***img1, double ***img2){
+
+	int indivimageheight, indivimagewidth;
+	indivimageheight = 1040;
+	indivimagewidth = 1392; 
+
+	double **image1, **image2;
+
+	createdoublematrix(&image1,indivimagewidth,indivimageheight);
+	createdoublematrix(&image2,indivimagewidth,indivimageheight);
+
+	for(int width=0; width != indivimagewidth; width++){
+		
+		for(int height=0; height != indivimageheight; height++){
+
+			image1[width][height] = mat[width][height];
+		}
+ 	}
+
+
+	for(int width=0; width != indivimagewidth; width++){
+	
+		for(int height=1392; height != (1392*2); height++){
+		
+			image2[width][height] = mat[width][height];
+
+		}
+	}
+
+	*img1 = image1;
+	*img2 = image2;
+
+	return(0);
+}
