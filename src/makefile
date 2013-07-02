@@ -1,7 +1,7 @@
 CC=gcc -ansi
 CUDACC=nvcc
 
-Objs=main.o
+Objs=main.o rasterarray.o
 
 BinaryName=gpuholography
 
