@@ -1,25 +1,25 @@
 CC=gcc -ansi
 CUDACC=nvcc
 
-Objs=main.o rasterarray.o
+Objs=main.o matrix.o cufft.o
 
 BinaryName=gpuholography
 
-CFLAGS=-O2 -g -Wall -Werror -Wextra -std=c99 -I. -I/usr/local/cuda/include -I/usr/local/lib -lcudart -lm -ltiff
-LDFLAGS=-Wall -O2 -g -L/usr/local/lib -std=c99 -L/usr/local/cuda/lib64 -lcudart -lcuda -ltiff
-CUDACCFLAGS=-O2 -g -I. -I/usr/local/cuda/include
+CFLAGS=-O2 -L/usr/local/cuda/lib64 -I. -I/usr/local/cuda/include -I/usr/local/lib -lcuda -lcudart -lm -ltiff
+LDFLAGS=-O2 -L/usr/local/lib  -L/usr/local/cuda/lib64 -lcudart -lcuda -ltiff -lm
+CUDACCFLAGS=-G -use_fast_math -arch=sm_20 --ptxas-options=-v -I. -I/usr/local/cuda/include -I/usr/local/cuda/lib64
 
 
 all: $(Objs) $(BinaryName)
 
 %.o:	%.c
-	$(CC) $(CFLAGS) -c $<
+	$(CUDACC) -c $<
 
 %.o: %.cu
-	$(CUDACC) $(CUDACCFLAGS) -c $<
+	$(CUDACC) -c $(CUDACCFLAGS) $<
 
 $(BinaryName):
-	$(CC) -o $(BinaryName) $(Objs) $(LDFLAGS)
+	$(CUDACC) -o $(BinaryName) $(Objs) $(LDFLAGS)
 
 clean:
 	rm -f $(Objs) $(BinaryName)
