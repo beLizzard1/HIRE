@@ -9,9 +9,9 @@
 #include "tiffman.h"
 
 int main(int argc, char *argv[]){
-	unsigned short *buffer, *temp1, *temp2;
-	float *image1, *image2;
-	unsigned int width, length, x, y, row, offset;
+	uint16 *buffer, *image1, *image2;
+	float *matrix;
+	unsigned int width, length, x, row, offset, i, y;
 	TIFF *image;
 
 	argc = argc;
@@ -33,11 +33,11 @@ int main(int argc, char *argv[]){
 /* Storing all the data into a 1d array for ease. Will need to carry around the width to find the offset */
 
 	buffer = _TIFFmalloc(TIFFScanlineSize(image));
-	temp1 = malloc((width * (length/2)) * sizeof(unsigned short));
-	temp2 = malloc((width * (length/2)) * sizeof(unsigned short));
 	
-	image1 = (float *)malloc((width * length/2) * sizeof(float));	
-	image2 = (float *)malloc((width * length/2) * sizeof(float));
+	image1 = malloc((width * length/2) * sizeof(unsigned short));	
+	image2 = malloc((width * length/2) * sizeof(unsigned short));
+	matrix = malloc((width * length/2) * sizeof(float));
+
 
 	if(image1 == NULL || image2 == NULL){
 		printf("An error has occured while allocating memory for the images\n");
@@ -53,13 +53,15 @@ int main(int argc, char *argv[]){
 
 		for( x = 0; x < width; x++ ){
 			offset = (row * width) + x;
-			temp1[offset] = buffer[width];
+			for( i = 0; i < width; i++){
+				image1[offset] = buffer[i];
+			}
 		}
 	}
 
- 
+	printf("First Image is loaded\n");
 
-        for (row = 1040; row < length; row++){
+        for (row = 1040; row < (length/2 -1); row++){
                 if(TIFFReadScanline(image,buffer,row,0) == -1){
                         printf("An error occured when processing the image\n");
                         return(1);
@@ -67,24 +69,32 @@ int main(int argc, char *argv[]){
 		
 		for( x = 0; x < width; x++){
 			offset = (row * width) + x;
-			temp2[offset] = buffer[width];
+			for( i = 0; i < width; i ++){
+			image2[offset] = buffer[i];
+			}
 		}
  	}
+	
+	printf("Second Image is loaded\n");
 
-	printf("Images have been split just going to print the values as a test \n");
+	printf("Images have been split, need to subtract and take the result as floats\n");
 
-	for(x = 0; x < width; x++){
-		for(y = 0; y < (length/2)-1; y++){
-			printf("Intensity Image 1: %hu\n", temp1[((y * width) + x)]);			
+	for(x=0; x < width; x++){
+		for(y=0; y < (length/2)-1; y++){
+			offset = (y * (width-1)) + x;
+			matrix[offset] = (float)image1[offset] - (float)image2[offset];
+			printf("Subtraction: %+g\n",matrix[offset]);
 		}
 	}
 
+	printf("Successfully subtracted the matrices\n");
 
-	free(image1);
-	free(image2);
 	_TIFFfree(buffer);
 	TIFFClose(image);
-		
+	free(image1);
+
+	printf("Successfully free'd the image buffer & the first image\n");
+
 	
 /* //Cleaning up the two images */
 
