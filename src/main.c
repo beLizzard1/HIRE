@@ -6,107 +6,94 @@
 #include <cuda.h>
 #include "cufft.cu.h"
 #include "matrix.h"
+#include "tiffman.h"
 
 int main(int argc, char *argv[]){
-	short config;
-	argc = argc;
-	uint16 bps,spp, *buffer;
-	uint32 width, length, currow, totalpixel;
+	unsigned short *buffer, *temp1, *temp2;
+	float *image1, *image2;
+	unsigned int width, length, x, y, row, offset;
 	TIFF *image;
-	
 
-	if((image = TIFFOpen(argv[1],"r")) == NULL){
-		printf("Error opening the TIFF Image\n");
+	argc = argc;
+
+        if((image = TIFFOpen(argv[1],"r")) == NULL){
+                printf("Error opening the TIFF Image\n");
+                return(1);
+        }
+	
+	fileopen(argv,&width,&length,image);
+
+	printf("Width: %u, Height: %u\n", width, length);
+	printf("This is actually comprised of two images\n");
+	printf("So when we read the data into the memory\nwe will split this into two arrays\n");
+
+	printf("Width (Image1): %u, Height (Image1): %u\n",width,length/2);
+	printf("Width (Image2): %u, Height (Image2): %u\n",width,length/2);
+	
+/* Storing all the data into a 1d array for ease. Will need to carry around the width to find the offset */
+
+	buffer = _TIFFmalloc(TIFFScanlineSize(image));
+	temp1 = malloc((width * (length/2)) * sizeof(unsigned short));
+	temp2 = malloc((width * (length/2)) * sizeof(unsigned short));
+	
+	image1 = (float *)malloc((width * length/2) * sizeof(float));	
+	image2 = (float *)malloc((width * length/2) * sizeof(float));
+
+	if(image1 == NULL || image2 == NULL){
+		printf("An error has occured while allocating memory for the images\n");
 		return(1);
 	}
 
-	printf("Loading image properties\n");
-	TIFFGetField(image, TIFFTAG_BITSPERSAMPLE, &bps);
-	TIFFGetField(image, TIFFTAG_IMAGEWIDTH, &width);
-	TIFFGetField(image, TIFFTAG_IMAGELENGTH, &length);
-	TIFFGetField(image, TIFFTAG_SAMPLESPERPIXEL, &spp);
-	TIFFGetField(image, TIFFTAG_PLANARCONFIG, &config);
+	printf("Loading the data from the images\n");
+       
+	for( row = 0; row < ((length / 2) - 1); row++ ){
+		if(TIFFReadScanline(image,buffer,row,0) == -1){
+			printf("An error occured when loading the image\n");
+		}
 
-	printf("Planar Config: %d, Bits Per Sample: %"PRId16", Samples Per Pixel: %"PRId16", Image Width: %"PRId32", Image Length/Height: %"PRId32"\n", config, bps,spp,width,length);  
+		for( x = 0; x < width; x++ ){
+			offset = (row * width) + x;
+			temp1[offset] = buffer[width];
+		}
+	}
 
-	totalpixel = length * width;
+ 
 
-	unsigned int i;
-	uint16 **image1, **image2;
-	
-	creatematrix(&image1, width, length);
-	creatematrix(&image2, width, length);
-
-	buffer = _TIFFmalloc(TIFFScanlineSize(image));
-
-	printf("Created the blocks in the host memory\n");
-        
-	for (currow = 0; currow < 1039; currow ++ ){
-                if(TIFFReadScanline(image,buffer,currow,0) == -1){
+        for (row = 1040; row < length; row++){
+                if(TIFFReadScanline(image,buffer,row,0) == -1){
                         printf("An error occured when processing the image\n");
                         return(1);
                 }
-                for(i = 0; i < width; i++){
-                       image1[i][currow] = buffer[i];
-                }
-        }
+		
+		for( x = 0; x < width; x++){
+			offset = (row * width) + x;
+			temp2[offset] = buffer[width];
+		}
+ 	}
 
-	uint32 row;	
+	printf("Images have been split just going to print the values as a test \n");
 
-        for (currow = 1040; currow < length; currow++){
-                if(TIFFReadScanline(image,buffer,currow,0) == -1){
-                        printf("An error occured when processing the image\n");
-                        return(1);
-                }
-                
-                for(i = 0; i < width; i++){
-			row = currow - 1040;
-			image2[i][row] = buffer[i];
-                }
-        }
+	for(x = 0; x < width; x++){
+		for(y = 0; y < (length/2)-1; y++){
+			printf("Intensity Image 1: %hu\n", temp1[((y * width) + x)]);			
+		}
+	}
 
 
-	// Finishing loading the image ( & splitting it ), now have two arrays of unsigned 16 bit integers to play around with. 
-
-	// Cleaning up stuff that isn't needed any more
-	
+	free(image1);
+	free(image2);
 	_TIFFfree(buffer);
 	TIFFClose(image);
 		
-	// Now we need to subtract the two images to remove the noise and prepare the resulting array/matrix for the result.
-	short int **matrix;
-	unsigned int x,y;
-
-	matrix = (int16 **)calloc(width, sizeof(int16 *));
-	for(i=0; i < width; i++){
-		matrix[i] = (int16 *)calloc(length,sizeof(int16));
-	}
-
-
-	for(x = 0; x < width; x++){
-		for(y = 1; y < length; y++){
-			matrix[x][y] = (image2[x][y] - image1[x][y]);
-			// printf("Intensity: %+d\n", matrix[x][y]);
-			}
-	}
 	
-	//Cleaning up the two images
-	freematrix(image1,width);
-	freematrix(image2,width);
+/* //Cleaning up the two images */
 
 
-	//Move to GPU
 	printf("Starting GPU based stuff\n");
-	gpucalculation(width, length/2, matrix);
 
 	
 	printf("Finished \n");
 
-	//Cleaning up the subtracted image
-	for(i=0; i < width; i++){
-		free(matrix[i]);
-	}
-	free(matrix);
 
 
 return(0);
