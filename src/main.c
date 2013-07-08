@@ -4,16 +4,18 @@
 #include <math.h>
 #include <tiffio.h>
 #include <cuda.h>
-#include "cufft.cu.h"
+#include "gpu.h"
 #include "matrix.h"
 #include "tiffman.h"
 
 int main(int argc, char *argv[]){
-	uint16 *buffer, *image1, *image2;
+	uint16 *buffer;
+	uint16 *image1, *image2;
 	float *matrix;
-	unsigned int width, length, x, row, offset, i, y;
+	unsigned int width, length, x, row, offset, y, currow;
 	TIFF *image;
 
+	currow = 0;
 	argc = argc;
 
         if((image = TIFFOpen(argv[1],"r")) == NULL){
@@ -34,8 +36,8 @@ int main(int argc, char *argv[]){
 
 	buffer = _TIFFmalloc(TIFFScanlineSize(image));
 	
-	image1 = malloc((width * length/2) * sizeof(unsigned short));	
-	image2 = malloc((width * length/2) * sizeof(unsigned short));
+	image1 = malloc((width * length/2) * sizeof(uint16));	
+	image2 = malloc((width * length/2) * sizeof(uint16));
 	matrix = malloc((width * length/2) * sizeof(float));
 
 
@@ -46,6 +48,7 @@ int main(int argc, char *argv[]){
 
 	printf("Loading the data from the images\n");
        
+	printf("Loading Image 1\n");
 	for( row = 0; row < ((length / 2) - 1); row++ ){
 		if(TIFFReadScanline(image,buffer,row,0) == -1){
 			printf("An error occured when loading the image\n");
@@ -53,49 +56,61 @@ int main(int argc, char *argv[]){
 
 		for( x = 0; x < width; x++ ){
 			offset = (row * width) + x;
-			for( i = 0; i < width; i++){
-				image1[offset] = buffer[i];
-			}
+			image1[offset] = (uint16)buffer[x];
+/*			printf("Image 1 - Original: %hu Memory: %hu\n", buffer[i], image1[offset]); */
 		}
 	}
+	printf("Image 1: Loaded\n");
 
-	printf("First Image is loaded\n");
-
-        for (row = 1040; row < (length/2 -1); row++){
-                if(TIFFReadScanline(image,buffer,row,0) == -1){
-                        printf("An error occured when processing the image\n");
-                        return(1);
-                }
-		
-		for( x = 0; x < width; x++){
-			offset = (row * width) + x;
-			for( i = 0; i < width; i ++){
-			image2[offset] = buffer[i];
-			}
+	printf("Loading Image 2\n");
+	for(row = 1040; row < length; row++){
+		if(TIFFReadScanline(image,buffer,row,0) == -1){
+			printf("An error occured when loading the image\n");
 		}
- 	}
-	
-	printf("Second Image is loaded\n");
+		for( x = 0; x < width; x++){
+			offset = (currow * width) + x;
+			image2[offset] = (uint16)buffer[x];
+/*			printf("Image 2 - Original: %hu Memory: %"PRId16"\n", buffer[i], image2[offset]); */
+			}
+		currow = currow + 1;
+		}
+
+	printf("Image 2: Loaded\n");
 
 	printf("Images have been split, need to subtract and take the result as floats\n");
 
-	for(x=0; x < width; x++){
-		for(y=0; y < (length/2)-1; y++){
-			offset = (y * (width-1)) + x;
+	for(y = 0; y < (length / 2); y++){
+		for(x = 0; x < width; x++){
+			offset = (y * width) + x;
 			matrix[offset] = (float)image1[offset] - (float)image2[offset];
-			printf("Subtraction: %+g\n",matrix[offset]);
+			/*  printf("%g \n", matrix[offset]); */
 		}
 	}
+
+	free(image1);
+	float *image2float;
+	image2float = malloc((width * length/2) * sizeof(float));
+		
+	for(offset = 0; offset < (width * (length / 2)); offset ++){
+		image2float[offset] = (float)image2[offset];	
+	}
+	
+	free(image2);		
+
+	/* Reference Amplitude Bit ! */
+	gpusqrt(image2float, width, (length/2));
+	unsigned int height = (length / 2);
+
+	referencephase(image2float, width, height);
 
 	printf("Successfully subtracted the matrices\n");
 
 	_TIFFfree(buffer);
 	TIFFClose(image);
-	free(image1);
 
-	printf("Successfully free'd the image buffer & the first image\n");
+	printf("Successfully free'd the buffer & closed the image\n");
 
-	
+
 /* //Cleaning up the two images */
 
 
@@ -103,8 +118,6 @@ int main(int argc, char *argv[]){
 
 	
 	printf("Finished \n");
-
-
 
 return(0);
 }

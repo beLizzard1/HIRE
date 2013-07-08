@@ -1,2 +1,3 @@
 *.o
 gpuholography
+gmon.out
