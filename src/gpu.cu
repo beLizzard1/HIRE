@@ -1,8 +1,9 @@
+#include <complex.h>
+#include <cuComplex.h>
 #include <cuda.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "complexnumbers.h"
 
 __global__ void sqrtkernel(float* gpudata, float* gpuresult, unsigned int width){
 
@@ -26,27 +27,50 @@ __global__ void distancekernel(float* gpudistance, unsigned int width, unsigned 
 
 }
 
+__global__ void wavecalckernel(cuComplex** refwave, float* data, float* distance, float k, unsigned int width){
+
+	int xcoord = blockIdx.x;
+	int ycoord = blockIdx.y;
+	int offset;
+	float sinvalue, cosvalue;
+
+	offset = (ycoord * width) + xcoord;
+	sincosf(k * distance[offset], &sinvalue, &cosvalue);
+	
+	refwave[offset]->x = data[offset] * cosvalue;
+	refwave[offset]->y = data[offset] * sinvalue;
+}
+
 extern "C" int referencephase(float *data, unsigned int width, unsigned int height){
 	dim3 threadsPerBlock(1,1);
 	dim3 numBlock(width/threadsPerBlock.x, height/threadsPerBlock.y);
-	unsigned int x, y, offset;
 	float realz, k;
-	float *distance, *gpudistance;
-	
+	float *distance, *gpudistance, *gpudata;
+	int offset;
+
 	k = 2 * M_PI / 0.780241;
 
 	realz = 43048; /* Distance from pinhold in Z axis */
 
 	distance = (float*)malloc(width * height * sizeof(float));
-	cudaMalloc(&gpudistance, sizeof(float) * (width * height));
+	cudaMalloc(&gpudistance, sizeof(cuComplex) * (width * height));
 	distancekernel<<<numBlock, threadsPerBlock >>>(gpudistance, width, height, realz);	
 	cudaMemcpy(distance, gpudistance, sizeof(float) * width * height, cudaMemcpyDeviceToHost);
-	cudaFree(gpudistance);
+
+	cuComplex *gpurefwave, *refwave;
+	cudaMalloc(&gpurefwave, sizeof(cuComplex) * (width * height));
+	refwave = (cuComplex *)calloc(width * height, sizeof(cuComplex));
+	cudaMalloc(&gpudata, sizeof(float) * width * height);
+	cudaMemcpy(gpudata,data, sizeof(float) * (width * height),cudaMemcpyHostToDevice);
+
+	wavecalckernel<<<numBlock, threadsPerBlock >>>(&gpurefwave, gpudata, gpudistance, k, width);
+	cudaMemcpy(gpurefwave,refwave,sizeof(cuComplex) * width * height, cudaMemcpyDeviceToHost);
 	
-	Complex ReferenceWave;
+	for(offset = 0; offset < (width * height); offset++){
+		printf("%g + %gi\n", refwave[offset].x, refwave[offset].y);
+	}
 
-	referencewave<<<numBlock, threadsPerBlock>>>(ReferenceWave, k, distance, data, width, height);			
-
+	cudaFree(gpurefwave);
 	return(0);
 
 }
