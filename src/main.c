@@ -1,165 +1,181 @@
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <inttypes.h>
 #include <math.h>
+
 #include <tiffio.h>
 #include <cuda.h>
 #include <cuComplex.h>
-#include <complex.h>
-#include "gpu.h"
-#include "matrix.h"
-#include "tiffman.h"
-#include "dftandprop.h"
+
+#include "subtractimages.h"
+#include "gpudistancegrid.h"
+#include "gpurefwavecalc.h"
+#include "gpusubdivref.h"
+#include "gpufouriertransform.h"
+#include "writetoimage.h"
+
 #define PI 3.1415926535
 
 
 int main(int argc, char *argv[]){
-	uint16 *buffer;
-	uint16 *image1, *image2;
-	float *matrix;
-	unsigned int width, length, x, row, offset, y, currow;
+
 	TIFF *image;
-	float k;
-	k =  2 * PI / 0.780241;
-
-	currow = 0;
-	argc = argc;
-
-        if((image = TIFFOpen(argv[1],"r")) == NULL){
-                printf("Error opening the TIFF Image\n");
-                return(1);
-        }
-	
-	fileopen(argv,&width,&length,image);
-
-	printf("Width: %u, Height: %u\n", width, length);
-	printf("This is actually comprised of two images\n");
-	printf("So when we read the data into the memory\nwe will split this into two arrays\n");
-
-	printf("Width (Image1): %u, Height (Image1): %u\n",width,length/2);
-	printf("Width (Image2): %u, Height (Image2): %u\n",width,length/2);
-	
-/* Storing all the data into a 1d array for ease. Will need to carry around the width to find the offset */
-
-	buffer = _TIFFmalloc(TIFFScanlineSize(image));
-
-		
-
-	image1 = malloc((width * length/2) * sizeof(uint16));	
-	image2 = malloc((width * length/2) * sizeof(uint16));
-	matrix = malloc((width * length/2) * sizeof(float));
+	unsigned int width, length, row, x, y, offset, column;
+	unsigned short bps, spp;
+	float *subtractedimage, *image2f, *dist2pinhole, pinholedist, k;
+	tsize_t scanlinesize;
 
 
-	if(image1 == NULL || image2 == NULL){
-		printf("An error has occured while allocating memory for the images\n");
+	k = ( 2 * PI ) / 0.780241;
+
+	if(argc < 2){
+		printf("You didn't provide the correct input\n");
 		return(1);
 	}
 
-	printf("Loading the data from the images\n");
-       
-	printf("Loading Image 1\n");
-	for( row = 0; row < ((length / 2) - 1); row++ ){
-		if(TIFFReadScanline(image,buffer,row,0) == -1){
-			printf("An error occured when loading the image\n");
-		}
 
-		for( x = 0; x < width; x++ ){
-			offset = (row * width) + x;
-			image1[offset] = (uint16)buffer[x];
-/*			printf("Image 1 - Original: %hu Memory: %hu\n", buffer[i], image1[offset]); */
+	if((image = TIFFOpen(argv[1], "r")) == NULL){
+		printf("Error Opening the image\n");
+		return(1);
+	}
+
+	scanlinesize = TIFFScanlineSize(image);
+	TIFFGetField(image, TIFFTAG_BITSPERSAMPLE, &bps);
+	TIFFGetField(image, TIFFTAG_SAMPLESPERPIXEL, &spp);
+	TIFFGetField(image, TIFFTAG_IMAGEWIDTH, &width);
+	TIFFGetField(image, TIFFTAG_IMAGELENGTH, &length);
+	printf("Image Properties: ");
+	printf("BitsPerSample: %u, SamplesPerPixel: %u, Image Width: %u, Image Length: %u\n", bps, spp, width, length);
+
+
+	printf("This data is actually comprised of two seperate images so we need to split them\n");
+	uint16 *buffer;
+	uint16 *image1, *image2;
+
+	image1 = malloc(width * length * sizeof(uint16));
+	image2 = malloc(width * length * sizeof(uint16));
+	buffer = _TIFFmalloc(TIFFScanlineSize(image));
+
+	if( image1 == NULL || image2 == NULL || buffer == NULL ){
+		fprintf(stderr, "An Error occured while allocating memory for the images\n");
+		return(0);
+	}
+
+	printf("Now to load the data from the image\n");
+
+	unsigned int height;
+	height = length / 2;
+
+	for( row = 0; row < ((length/2)-1); row++){
+		TIFFReadScanline(image,buffer,row,0);
+		for(column = 0; column < width; column++){
+			offset = (row * width) + column;
+			image1[offset] = buffer[column];
+/*			printf("%hu\n", image1[offset]); */
+		}
+	}	      
+
+	for( row = 1040; row < (length - 1); row++){
+		TIFFReadScanline(image,buffer,row,0);
+		for(column = 0; column < width; column++){
+			offset = ((row - 1040) * width) + column;
+			image2[offset] = buffer[column];
+/*			printf("%hu\n", image2[offset]); */
 		}
 	}
-	printf("Image 1: Loaded\n");
 
-	printf("Loading Image 2\n");
-	for(row = 1040; row < length; row++){
-		if(TIFFReadScanline(image,buffer,row,0) == -1){
-			printf("An error occured when loading the image\n");
-		}
-		for( x = 0; x < width; x++){
-			offset = (currow * width) + x;
-			image2[offset] = (uint16)buffer[x];
-/*			printf("Image 2 - Original: %hu Memory: %"PRId16"\n", buffer[i], image2[offset]); */
-			}
-		currow = currow + 1;
-		}
+	printf("Now to Subtract the images\n");
 
-	printf("Image 2: Loaded\n");
+	subtractedimage = malloc(width * height * sizeof(float));
 
-	printf("Images have been split, need to subtract and take the result as floats\n");
+	subtractimages(image1, image2, subtractedimage, width, height);
 
-	for(y = 0; y < (length / 2); y++){
-		for(x = 0; x < width; x++){
+	image2f = malloc(width * height * sizeof(float));
+
+	dist2pinhole = malloc(width * height * sizeof(float));
+
+	pinholedist = 43048; /* Distance to the central pixel of the sensor in micron */
+
+	gpudistancegrid(dist2pinhole, pinholedist, width, height);
+
+	/* Starting Reference Wave calculations */
+	/* Several difference ways of doing this, because the image I am working with is a double pinhole, I need to take the mean amplitude of image2f */	
+
+	/* Double Pinhole stuff takes the mean */
+
+	float total;
+	total = 0;
+	for(offset = 0; offset < width * height; offset++){
+		total += (float)image2[offset];
+	}	
+	printf("Sqrt of Mean Value: %g\n", (float)sqrtf(total/(offset)));
+	printf("Now assigning that to every field within image2f\n");
+	for(x = 0; x < width; x++){
+		for(y = 0; y < height; y++){
 			offset = (y * width) + x;
-			matrix[offset] = (float)image1[offset] - (float)image2[offset];
-/*			printf("%g \n", matrix[offset]); */
+			image2f[offset] = sqrtf((float)total / (width * height));
 		}
 	}
 
-	free(image1);
-
-	float *image2float, *distancegrid;
-	image2float = (float *)malloc((width * length/2) * sizeof(float));
-	distancegrid = (float *)malloc((width * length/2) * sizeof(float));		
-
-	for(offset = 0; offset < (width * (length / 2)); offset ++){
-		image2float[offset] = (float)image2[offset];
-/*		printf("Original: %f New: %f \n", (float)image2[offset],image2float[offset]); */
-	}
-	
-	free(image2);
-	
-	/* Reference Amplitude Bit ! */
-	/* gpusqrt(image2float, width, (length/2)); use this line to do single pinhole stuff */
-
-	/* Temporarily holding the reference amplitude to 1 */
-	for (offset = 0; offset < (width * length/2); offset++){
-		image2float[offset] = 1;
-	}
-
-
-	unsigned int height = (length / 2);
-
-/*	for(offset = 0; offset < (width * height); offset++){
-		printf("After GPUSqrt in Main Function: %f\n", image2float[offset]);
-	} */
-
-	gpudistance(distancegrid, width, height);
-	cuComplex *referencewave;
-	referencewave = (cuComplex *)malloc(sizeof(float) * width * height);
-
-	/* Works up to here 10/07/2013 11:29 */
-
-	gpurefwavecalc(referencewave,image2float, distancegrid, k, width, height);
+	/* Single Pinhole takes each indiviual value uncomment to use */
 /*
-	for(offset = 0; offset < (width * height); offset ++){
-		printf("%+f %+fi\n", referencewave[offset].x, referencewave[offset].y);
+	for(x = 0; x < width; x++){
+                for(y = 0; y < height; y++){
+                        offset = (y * width) + x;
+                        image2f[offset] = (float)image2[offset];
+                }
+        }
+*/	
+	cuComplex *referencewave;
+
+	referencewave = malloc(sizeof(cuComplex) * width * height);	
+
+	gpurefwavecalc(referencewave, image2f, dist2pinhole, k, width, height);
+	
+/*
+	for(x = 0; x < width; x++){
+		for(y = 0; y < height; y++){
+			offset = (y * width) + x;
+			printf("%g%+gi\n", referencewave[offset].x, referencewave[offset].y);
+		}
 	}
 */
-	free(image2float);
+
+
+	/* Now we need to divide by the reference wave calculated above to find the reduced hologram */
+	cuComplex *reducedhologram;
+	reducedhologram = malloc(sizeof(cuComplex) * width * height);
+
+	gpusubdivref(reducedhologram, subtractedimage, referencewave, width, height);
+
+	/* Starting Fourier Transfrom stuff */
+
+	cuComplex *treducedhologram;
+	treducedhologram = malloc(sizeof(cuComplex) * width * height);
+	gpufouriertransform(reducedhologram, treducedhologram, width, height);
+	
+	TIFF* output;
+	
+	if((output = TIFFOpen("/tmp/image.tiff", "w")) == NULL){
+                printf("Error Opening the image\n");
+                return(1);
+        }
+
+	writeimage(output, width, height, treducedhologram, scanlinesize);
+
+
+
+	/* Freeing stuff that has been allocated to the host */
+	free(image1);
+	free(image2);
+	free(subtractedimage);
+	free(image2f);
+	free(dist2pinhole);
+	free(referencewave);
+	free(reducedhologram);
 	_TIFFfree(buffer);
 	TIFFClose(image);
 	
-	printf("Successfully free'd the buffer & closed the image\n");
-	printf("Calculated the Reference Wave on the GPU, bet you didn't notice that\n");
-
-	printf("This bit was James' idea he thinks that we 'multiply' by the reference wave because of 'reasons'\n");
-	
-	cuComplex *reducedhologram;
-	reducedhologram = (cuComplex *)malloc(sizeof(cuComplex) * width * height);
-
-	subimagedivref(reducedhologram, matrix, referencewave, width, height);
-
-	/* Starting the Fourier Transform stuff */
-
-	float startz;
-	float endz;
-	startz = 0;
-	endz = 1;
-
-	gpudftwithprop(reducedhologram, width, height,startz, endz);
-
-	printf("Finished \n");
-
-return(0);
+	return(0);
 }
