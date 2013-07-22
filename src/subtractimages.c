@@ -6,7 +6,7 @@
 #include <tiffio.h>
 
 
-int subtractimages(uint16 *image1,uint16 *image2, float *subtractedimage, unsigned int width, unsigned int height){
+int subtractimages(void *image1,void *image2, float *subtractedimage, unsigned int width, unsigned int height){
 
 	unsigned int offset, x, y;
 
@@ -14,8 +14,8 @@ int subtractimages(uint16 *image1,uint16 *image2, float *subtractedimage, unsign
 		for(y=0; y < height; y++){
 			offset = (y * width) + x;
 /*			printf("%f\n", (float)image1[offset] - (float)image2[offset]); */
-			
-			subtractedimage[offset] = (float)image1[offset] - (float)image2[offset];
+			printf("");
+			/*subtractedimage[offset] = image1[offset] - image2[offset]; */
 		}
 	}
 

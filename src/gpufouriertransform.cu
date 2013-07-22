@@ -15,6 +15,7 @@ extern "C" int gpufouriertransform(cuComplex *original, cuComplex *transform, un
 
 	cuComplex *gpuoriginal, *gputransform;
 
+	printf("Starting the gpu FFT\n");
 
 	cudaMalloc(&gpuoriginal, sizeof(cuComplex) * width * height);
 	cudaMalloc(&gputransform, sizeof(cuComplex) * width * height);
@@ -41,4 +42,31 @@ extern "C" int gpufouriertransform(cuComplex *original, cuComplex *transform, un
 */
 
 	return(0);
+}
+
+extern "C" int floatfft(float* original,cuComplex* transform,unsigned int width, unsigned int height){
+
+
+	cufftHandle plan;
+	cufftPlan2d(&plan,width, height, CUFFT_R2C);
+
+	cufftReal *gpuoriginal;
+	cuComplex  *gputransform;
+
+
+	cudaMalloc(&gpuoriginal, sizeof(cuComplex) * width * height);
+	cudaMalloc(&gputransform, sizeof(cufftReal) * width * height);
+
+	cudaDeviceSynchronize();
+
+	cudaMemcpy(gpuoriginal, original, sizeof(cufftReal) * width * height, cudaMemcpyHostToDevice);
+	cudaDeviceSynchronize();
+
+	cufftExecR2C(plan, gpuoriginal, gputransform);
+
+	cudaMemcpy(transform, gputransform, sizeof(cuComplex) * width * height, cudaMemcpyDeviceToHost);
+
+
+	return(0);
+
 }

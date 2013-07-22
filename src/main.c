@@ -3,7 +3,7 @@
 
 #include <inttypes.h>
 #include <math.h>
-
+#include <string.h>
 #include <tiffio.h>
 #include <cuda.h>
 #include <cuComplex.h>
@@ -20,11 +20,11 @@
 
 int main(int argc, char *argv[]){
 
-	TIFF *image;
-	unsigned int width, length, row, x, y, offset, column;
+	TIFF *image, *output;
+	unsigned int width, length, x, y, offset, height, i;
 	unsigned short bps, spp;
-	float *subtractedimage, *image2f, *dist2pinhole, pinholedist, k;
-	tsize_t scanlinesize;
+	float *subtractedimage, *dist2pinhole, pinholedist, k;
+	tsize_t scanlinesize, objsize;
 
 
 	k = ( 2 * PI ) / 0.780241;
@@ -45,65 +45,56 @@ int main(int argc, char *argv[]){
 	TIFFGetField(image, TIFFTAG_SAMPLESPERPIXEL, &spp);
 	TIFFGetField(image, TIFFTAG_IMAGEWIDTH, &width);
 	TIFFGetField(image, TIFFTAG_IMAGELENGTH, &length);
+	height = length / 2;
 	printf("Image Properties: ");
 	printf("BitsPerSample: %u, SamplesPerPixel: %u, Image Width: %u, Image Length: %u\n", bps, spp, width, length);
 
 
-	printf("This data is actually comprised of two seperate images so we need to split them\n");
-	uint16 *buffer;
+	scanlinesize = TIFFScanlineSize(image);
+	objsize = (scanlinesize) / (width * spp);
+
 	uint16 *image1, *image2;
+	uint16 *buffer;
+	image1 = _TIFFmalloc(objsize * width * height);
+	image2 = _TIFFmalloc(objsize * width * height);
+	buffer = _TIFFmalloc(objsize * width);
 
-	image1 = malloc(width * length * sizeof(uint16));
-	image2 = malloc(width * length * sizeof(uint16));
-	buffer = _TIFFmalloc(TIFFScanlineSize(image));
 
-	if( image1 == NULL || image2 == NULL || buffer == NULL ){
+        if( image1 == NULL || image2 == NULL || buffer == NULL ){
 		fprintf(stderr, "An Error occured while allocating memory for the images\n");
 		return(0);
 	}
 
-	printf("Now to load the data from the image\n");
+	printf("Now to load the data from the provided image\n");
 
-	unsigned int height;
-	height = length / 2;
-
-	for( row = 0; row < ((length/2)-1); row++){
-		TIFFReadScanline(image,buffer,row,0);
-		for(column = 0; column < width; column++){
-			offset = (row * width) + column;
-			image1[offset] = buffer[column];
-/*			printf("%hu\n", image1[offset]); */
-		}
-	}	      
-
-	for( row = 1040; row < (length - 1); row++){
-		TIFFReadScanline(image,buffer,row,0);
-		for(column = 0; column < width; column++){
-			offset = ((row - 1040) * width) + column;
-			image2[offset] = buffer[column];
-/*			printf("%hu\n", image2[offset]); */
-		}
+	for( i = 0; i < (height - 1); i++){
+		TIFFReadScanline(image, buffer, i,0);
+		memcpy(&image1[i * width], buffer, scanlinesize);
 	}
 
-	printf("Now to Subtract the images\n");
+	for( i = (height); i < length; i++){
+		TIFFReadScanline(image, buffer, i, 0);
+		memcpy(&image2[( i - height ) * width], buffer, scanlinesize);
+	}
 
-	subtractedimage = malloc(width * height * sizeof(float));
+	free(buffer);
 
-	subtractimages(image1, image2, subtractedimage, width, height);
-
-	image2f = malloc(width * height * sizeof(float));
+/*	subtractimages(image1, image2, subtractedimage, width, height);
 
 	dist2pinhole = malloc(width * height * sizeof(float));
-
+*/
 	pinholedist = 43048; /* Distance to the central pixel of the sensor in micron */
+/*
 
 	gpudistancegrid(dist2pinhole, pinholedist, width, height);
 
+*/
 	/* Starting Reference Wave calculations */
 	/* Several difference ways of doing this, because the image I am working with is a double pinhole, I need to take the mean amplitude of image2f */	
 
 	/* Double Pinhole stuff takes the mean */
 
+/*
 	float total;
 	total = 0;
 	for(offset = 0; offset < width * height; offset++){
@@ -114,9 +105,10 @@ int main(int argc, char *argv[]){
 	for(x = 0; x < width; x++){
 		for(y = 0; y < height; y++){
 			offset = (y * width) + x;
-			image2f[offset] = sqrtf((float)total / (width * height));
+			image2[offset] = sqrtf((float)total / (float)(width * height));
 		}
 	}
+*/
 
 	/* Single Pinhole takes each indiviual value uncomment to use */
 /*
@@ -127,12 +119,12 @@ int main(int argc, char *argv[]){
                 }
         }
 */	
-	cuComplex *referencewave;
+/*	cuComplex *referencewave;
 
 	referencewave = malloc(sizeof(cuComplex) * width * height);	
 
-	gpurefwavecalc(referencewave, image2f, dist2pinhole, k, width, height);
-	
+	gpurefwavecalc(referencewave, image2, dist2pinhole, k, width, height);
+*/	
 /*
 	for(x = 0; x < width; x++){
 		for(y = 0; y < height; y++){
@@ -144,38 +136,63 @@ int main(int argc, char *argv[]){
 
 
 	/* Now we need to divide by the reference wave calculated above to find the reduced hologram */
-	cuComplex *reducedhologram;
+/*	cuComplex *reducedhologram;
 	reducedhologram = malloc(sizeof(cuComplex) * width * height);
 
 	gpusubdivref(reducedhologram, subtractedimage, referencewave, width, height);
+*/
 
-	/* Starting Fourier Transfrom stuff */
+	/* Starting Fourier Transform stuff */
 
-	cuComplex *treducedhologram;
+	/* Temporary Bit just to get a reconstruction */
+
+	cuComplex *sub;
+	sub = malloc(sizeof(cuComplex) * width * height);
+
+	for(offset = 0; offset < (width * height); offset++){
+		sub[offset].x = (float)image1[offset] - (float)image2[offset];
+		sub[offset].y = 0;
+	}
+
+/*	cuComplex *treducedhologram;
 	treducedhologram = malloc(sizeof(cuComplex) * width * height);
 	gpufouriertransform(reducedhologram, treducedhologram, width, height);
+*/
+	cuComplex *tsub;
+	tsub = malloc(sizeof(cuComplex) * width * height);
+	gpufouriertransform(sub, tsub, width, height);
+		
+	printf("Writing the output.tiff\n");
+
+	if((output = TIFFOpen("result.tiff", "w")) == NULL){
+		printf("Error opening image\n");
+		return(1);
+	}
+	writerealimage(output, width, height, tsub, scanlinesize);
+
+	if((output = TIFFOpen("resultcomplex.tiff", "w")) == NULL){
+		printf("Error opening image \n");
+		return(1);
+	}
+	writecompleximage(output, width, height, tsub, scanlinesize);
+
 	
-	TIFF* output;
-	
-	if((output = TIFFOpen("/tmp/image.tiff", "w")) == NULL){
+/*	if((output = TIFFOpen("/tmp/image.tiff", "w")) == NULL){
                 printf("Error Opening the image\n");
                 return(1);
-        }
+        } 
 
 	writeimage(output, width, height, treducedhologram, scanlinesize);
-
+*/
 
 
 	/* Freeing stuff that has been allocated to the host */
-	free(image1);
-	free(image2);
-	free(subtractedimage);
-	free(image2f);
+/*	free(subtractedimage);
 	free(dist2pinhole);
 	free(referencewave);
 	free(reducedhologram);
 	_TIFFfree(buffer);
 	TIFFClose(image);
-	
+*/	
 	return(0);
 }
