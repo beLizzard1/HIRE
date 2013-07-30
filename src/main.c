@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -6,28 +7,29 @@
 #include <string.h>
 #include <tiffio.h>
 #include <cuda.h>
+
 #include <cuComplex.h>
 
-#include "subtractimages.h"
+#include "gpupropagate.h"
 #include "gpudistancegrid.h"
 #include "gpurefwavecalc.h"
-#include "gpusubdivref.h"
 #include "gpufouriertransform.h"
 #include "writetoimage.h"
-
-#define PI 3.1415926535
-
+#define M_PI 3.14159265359
 
 int main(int argc, char *argv[]){
 
+	float planeseparation;
+	planeseparation = 500;
+
 	TIFF *image, *output;
-	unsigned int width, length, x, y, offset, height, i;
+	unsigned int width, length, offset, height, i;
 	unsigned short bps, spp;
-	float *subtractedimage, *dist2pinhole, pinholedist, k;
+	float k, pixelsize, pinholedist;
 	tsize_t scanlinesize, objsize;
 
-
-	k = ( 2 * PI ) / 0.780241;
+	pixelsize = 6.45;
+	k = ( 2 * M_PI ) / 0.780241;
 
 	if(argc < 2){
 		printf("You didn't provide the correct input\n");
@@ -50,7 +52,6 @@ int main(int argc, char *argv[]){
 	printf("BitsPerSample: %u, SamplesPerPixel: %u, Image Width: %u, Image Length: %u\n", bps, spp, width, length);
 
 
-	scanlinesize = TIFFScanlineSize(image);
 	objsize = (scanlinesize) / (width * spp);
 
 	uint16 *image1, *image2;
@@ -79,112 +80,230 @@ int main(int argc, char *argv[]){
 
 	free(buffer);
 
-/*	subtractimages(image1, image2, subtractedimage, width, height);
+	long *longimg1, *longimg2;
+	float *fimg1, *fimg2;
 
-	dist2pinhole = malloc(width * height * sizeof(float));
-*/
-	pinholedist = 43048; /* Distance to the central pixel of the sensor in micron */
-/*
+	longimg1 = malloc(sizeof(long) * width * height);
+	longimg2 = malloc(sizeof(long) * width * height);
+	fimg1 = malloc(sizeof(float) * width * height);
+	fimg2 = malloc(sizeof(float) * width * height);
 
-	gpudistancegrid(dist2pinhole, pinholedist, width, height);
-
-*/
-	/* Starting Reference Wave calculations */
-	/* Several difference ways of doing this, because the image I am working with is a double pinhole, I need to take the mean amplitude of image2f */	
-
-	/* Double Pinhole stuff takes the mean */
-
-/*
-	float total;
-	total = 0;
-	for(offset = 0; offset < width * height; offset++){
-		total += (float)image2[offset];
-	}	
-	printf("Sqrt of Mean Value: %g\n", (float)sqrtf(total/(offset)));
-	printf("Now assigning that to every field within image2f\n");
-	for(x = 0; x < width; x++){
-		for(y = 0; y < height; y++){
-			offset = (y * width) + x;
-			image2[offset] = sqrtf((float)total / (float)(width * height));
-		}
-	}
-*/
-
-	/* Single Pinhole takes each indiviual value uncomment to use */
-/*
-	for(x = 0; x < width; x++){
-                for(y = 0; y < height; y++){
-                        offset = (y * width) + x;
-                        image2f[offset] = (float)image2[offset];
-                }
+        for(offset = 0; offset < (width * height); offset++){
+                longimg1[offset] = (long)image1[offset];
+                longimg2[offset] = (long)image2[offset];
         }
-*/	
-/*	cuComplex *referencewave;
+
+	for(offset = 0; offset < (width * height); offset++){
+		fimg1[offset] = (float)longimg1[offset];
+		fimg2[offset] = (float)longimg2[offset];
+	}
+
+	free(image1);
+	free(image2);
+	free(longimg1);
+	free(longimg2);
+
+	/* View img1, img2 */
+	cuComplex *cuimg1, *cuimg2;
+	cuimg1 = malloc(sizeof(cuComplex) * width * height);
+	cuimg2 = malloc(sizeof(cuComplex) * width * height);
+
+	for(offset = 0; offset < (width * height); offset ++){
+		cuimg1[offset].x = fimg1[offset];
+		cuimg2[offset].x = fimg2[offset];
+	}
+
+	        if((output = TIFFOpen("img1.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writerealimage(output, width, height, cuimg1, scanlinesize);
+
+                if((output = TIFFOpen("img2.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writerealimage(output, width, height, cuimg2, scanlinesize);
+
+	free(cuimg1);
+	free(cuimg2);
+
+
+        cuComplex *sub;
+        sub = malloc(sizeof(cuComplex) * width * height);
+
+        for(offset = 0; offset < (width * height); offset++){
+                sub[offset].x = fimg1[offset] - fimg2[offset];
+                sub[offset].y = 0;
+        }
+	
+		if((output = TIFFOpen("sub.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+	writerealimage(output, width, height, sub, scanlinesize);
+
+
+
+	free(fimg1);
+	free(fimg2);
+
+	pinholedist = 43048; /* Distance to the central pixel of the sensor in micron */
+	pinholedist = 80000;
+
+	cuComplex *referencewave;
 
 	referencewave = malloc(sizeof(cuComplex) * width * height);	
 
-	gpurefwavecalc(referencewave, image2, dist2pinhole, k, width, height);
-*/	
-/*
-	for(x = 0; x < width; x++){
-		for(y = 0; y < height; y++){
-			offset = (y * width) + x;
-			printf("%g%+gi\n", referencewave[offset].x, referencewave[offset].y);
-		}
-	}
-*/
+	gpurefwavecalc(referencewave, width, height, pinholedist,k,pixelsize);
+	
+        if((output = TIFFOpen("referencewave/realrefresult.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writerealimage(output, width, height, referencewave, scanlinesize);
+
+	        if((output = TIFFOpen("referencewave/imagrefresult.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+	writecompleximage(output, width, height, referencewave, scanlinesize);
+                if((output = TIFFOpen("referencewave/absrefresult.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writeabsimage(output, width, height, referencewave, scanlinesize);
 
 
-	/* Now we need to divide by the reference wave calculated above to find the reduced hologram */
-/*	cuComplex *reducedhologram;
+
+	/* Dividing the Subtracted Image by the Reference Wave */
+
+	cuComplex *reducedhologram;
 	reducedhologram = malloc(sizeof(cuComplex) * width * height);
 
-	gpusubdivref(reducedhologram, subtractedimage, referencewave, width, height);
-*/
+	for(offset = 0; offset < (width * height); offset++){
+		reducedhologram[offset].x = (sub[offset].x * referencewave[offset].x) / ((referencewave[offset].x * referencewave[offset].x) + (referencewave[offset].y * referencewave[offset].y));
+
+		reducedhologram[offset].y = (sub[offset].x * referencewave[offset].y) / ((referencewave[offset].x * referencewave[offset].x) + (referencewave[offset].y * referencewave[offset].y));
+
+
+	}
+
+	        if((output = TIFFOpen("reducedhologram/realreducedhologram.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+	writerealimage(output, width, height, reducedhologram, scanlinesize);
+	
+		        if((output = TIFFOpen("reducedhologram/imagreducedhologram.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+	writecompleximage(output, width, height, reducedhologram, scanlinesize);
+
+                if((output = TIFFOpen("reducedhologram/absreducedhologram.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writeabsimage(output, width, height, reducedhologram, scanlinesize);
+
+
 
 	/* Starting Fourier Transform stuff */
 
-	/* Temporary Bit just to get a reconstruction */
-
-	cuComplex *sub;
-	sub = malloc(sizeof(cuComplex) * width * height);
-
-	for(offset = 0; offset < (width * height); offset++){
-		sub[offset].x = (float)image1[offset] - (float)image2[offset];
-		sub[offset].y = 0;
-	}
-
-/*	cuComplex *treducedhologram;
-	treducedhologram = malloc(sizeof(cuComplex) * width * height);
-	gpufouriertransform(reducedhologram, treducedhologram, width, height);
-*/
-	cuComplex *tsub;
-	tsub = malloc(sizeof(cuComplex) * width * height);
-	gpufouriertransform(sub, tsub, width, height);
-		
+	cuComplex *tredhologram;
+	tredhologram = malloc(sizeof(cuComplex) * width * height);
+	gpufouriertransform(reducedhologram, tredhologram, width, height);
+	
 	printf("Writing the output.tiff\n");
 
-	if((output = TIFFOpen("result.tiff", "w")) == NULL){
+	if((output = TIFFOpen("fftreducedhologram/result.tiff", "w")) == NULL){
 		printf("Error opening image\n");
 		return(1);
 	}
-	writerealimage(output, width, height, tsub, scanlinesize);
+	writerealimage(output, width, height, tredhologram, scanlinesize);
 
-	if((output = TIFFOpen("resultcomplex.tiff", "w")) == NULL){
+	if((output = TIFFOpen("fftreducedhologram/resultimag.tiff", "w")) == NULL){
 		printf("Error opening image \n");
 		return(1);
 	}
-	writecompleximage(output, width, height, tsub, scanlinesize);
+	writecompleximage(output, width, height, tredhologram, scanlinesize);
 
-	
-/*	if((output = TIFFOpen("/tmp/image.tiff", "w")) == NULL){
-                printf("Error Opening the image\n");
+	if((output = TIFFOpen("fftreducedhologram/abs.tiff","w")) == NULL){
+		printf("Error opening the image\n");
+		return(1);
+	}
+	writeabsimage(output, width, height, tredhologram, scanlinesize);
+
+
+ 	/* Doing another fourier transform, to see if the input and output are the same */
+	cuComplex *itredhologram;
+	itredhologram = malloc(sizeof(cuComplex) * width * height);
+	gpuifouriertransform(tredhologram, itredhologram, width, height);
+
+        if((output = TIFFOpen("ifftreducedhologram/realifftresult.tiff", "w")) == NULL){
+                printf("Error opening image\n");
                 return(1);
-        } 
+        }
+        writerealimage(output, width, height, itredhologram, scanlinesize);
 
-	writeimage(output, width, height, treducedhologram, scanlinesize);
-*/
+        if((output = TIFFOpen("ifftreducedhologram/imagifftresult.tiff", "w")) == NULL){
+                printf("Error opening image \n");
+                return(1);
+        }
+        writecompleximage(output, width, height, itredhologram, scanlinesize);
+	
+	if((output = TIFFOpen("ifftreducedhologram/absifftresult.tiff", "w")) == NULL){
+                printf("Error opening image \n");
+                return(1);
+        }
+	writeabsimage(output, width, height, itredhologram, scanlinesize);
+	
 
+
+
+	/* Propagating the transformed image */
+	cuComplex *propagatedimage, *ipropagatedimage;
+	propagatedimage = malloc(sizeof(cuComplex) * width * height);
+	ipropagatedimage = malloc(sizeof(cuComplex) * width * height);
+	float dist, maxdist;
+	char realdist[50], imagdist[50], absdist[50];
+	maxdist = 40000;
+
+	for(dist = 0; dist < maxdist; dist = dist + planeseparation){
+
+	snprintf( realdist, 50, "/mnt/tmpfs/propagatedplanes/real/%lg.tiff", dist);
+	snprintf( imagdist, 50, "/mnt/tmpfs/propagatedplanes/imag/%lg.tiff", dist);
+	snprintf( absdist, 50, "/mnt/tmpfs/propagatedplanes/abs/%lg.tiff", dist);
+
+	gpupropagate(tredhologram, propagatedimage, width, height, k, pixelsize,dist, scanlinesize);
+
+	gpuifouriertransform(propagatedimage, ipropagatedimage, width, height);
+
+        if((output = TIFFOpen(absdist,"w")) == NULL){
+                printf("Error opening the image\n");
+                return(1);
+        }
+        writeabsimage(output, width, height, ipropagatedimage, scanlinesize);
+
+	if((output = TIFFOpen(realdist, "w")) == NULL){
+		printf("Error opening the image\n");
+		return(1);
+	}
+	writerealimage(output, width, height, ipropagatedimage, scanlinesize);
+
+	if((output = TIFFOpen(imagdist, "w")) == NULL){
+		printf("Error opening the image\n");
+		return(1);
+	}
+	writecompleximage(output, width, height, ipropagatedimage, scanlinesize);
+
+	}	
+	
+
+
+
+	cudaDeviceReset();
 
 	/* Freeing stuff that has been allocated to the host */
 /*	free(subtractedimage);

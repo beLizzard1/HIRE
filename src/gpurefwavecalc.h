@@ -1,1 +1,1 @@
-int gpurefwavecalc(cuComplex *refwave, float *image2, float *distancegrid, float k, unsigned int width, unsigned int height);
+int gpurefwavecalc(cuComplex *refwave, unsigned int width, unsigned int height, float pinholedist, float k, float pixelsize);

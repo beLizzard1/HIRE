@@ -7,52 +7,50 @@
 #include <cuda.h>
 #include <cuComplex.h>
 
-__global__ void gpurefwavecalc(cuComplex *gpureferencewave, float *gpudistancegrid, float *gpuimage2f, float k, float width){
+__device__ float distcalc(unsigned int bidx, unsigned int bidy, unsigned int width, unsigned int height, float pinholedist, float pixelsize){
 
-	int bidx = blockIdx.x;
-	int bidy = blockIdx.y;
-	int offset;
-	float sincomp, coscomp;
+	float xcon, ycon, Rxy;
+	xcon = (((float)bidx - (float)width/2 - 80) * pixelsize);
+	ycon = (((float)bidy - (float)height/2) * pixelsize);
 
-	offset = (bidy * width) + bidx;
+	Rxy = sqrtf((xcon * xcon) + (ycon * ycon) + (pinholedist * pinholedist));
+	return(Rxy);
+}
 
-	sincosf(k * gpudistancegrid[offset], &sincomp, &coscomp);
+__global__ void gpurefwavecalckernel(cuComplex *gpureferencewave, unsigned int width, unsigned int height, float pinholedist, float k, float pixelsize){
 
-	gpureferencewave[offset].x = (gpuimage2f[offset] * coscomp);
-	gpureferencewave[offset].y = (gpuimage2f[offset] * sincomp);
+	int bidx = blockIdx.x * blockDim.x + threadIdx.x;
+	int bidy = blockIdx.y * blockDim.y + threadIdx.y;
+	int offset = (bidy * width) + bidx;
+	float sin, cos;
+	float Rxy;
+	Rxy = distcalc(bidx,bidy, width, height, pinholedist, pixelsize);
 
+	sincosf(k * Rxy, &sin, &cos);
+
+	gpureferencewave[offset].x = cos;
+	gpureferencewave[offset].y = sin;
 
 }
 
-extern "C" int gpurefwavecalc(cuComplex *refwave, float *image2f, float *distancegrid, float k, unsigned int width, unsigned int height){
+extern "C" int gpurefwavecalc(cuComplex *refwave, unsigned int width, unsigned int height, float pinholedist, float k, float pixelsize){
 
-	dim3 threadsPerBlock(1,1);
+	dim3 threadsPerBlock(16,16);
 	dim3 numBlock(width/threadsPerBlock.x, height/threadsPerBlock.y);
 
 	cuComplex *gpureferencewave;
-	float *gpudistancegrid, *gpuimage2f;
-
 	cudaMalloc(&gpureferencewave, sizeof(cuComplex) * width * height);
-	cudaMalloc(&gpudistancegrid, sizeof(float) * width * height);
-	cudaMalloc(&gpuimage2f, sizeof(float) * width * height);
-
-	cudaMemcpy(gpudistancegrid, distancegrid, sizeof(float) * width * height, cudaMemcpyHostToDevice);
-	cudaMemcpy(gpuimage2f, image2f, sizeof(float) * width * height, cudaMemcpyHostToDevice);
 
 	cudaDeviceSynchronize();
 	printf("Allocating Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
-	gpurefwavecalc<<<numBlock, threadsPerBlock>>>(gpureferencewave, gpudistancegrid, gpuimage2f, k, width);
-	cudaDeviceSynchronize();
-	printf("ReferenceWaveCalcKernel errors(?): %s\n", cudaGetErrorString(cudaGetLastError()));
+	gpurefwavecalckernel<<<numBlock, threadsPerBlock>>>(gpureferencewave, width, height, pinholedist, k, pixelsize);
 
 	cudaMemcpy(refwave, gpureferencewave, sizeof(cuComplex) * width * height, cudaMemcpyDeviceToHost);
+	
 	cudaDeviceSynchronize();
-	printf("ReferenceWaveCalcKernel errors(?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        printf("Copying results from GPU errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
 	cudaFree(gpureferencewave);
-	cudaFree(gpudistancegrid);
-	cudaFree(gpuimage2f);
-	cudaDeviceReset();
 	return(0);
 }
