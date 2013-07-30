@@ -3,6 +3,7 @@
 
 #include <inttypes.h>
 #include <math.h>
+#include <string.h>
 
 #include <tiffio.h>
 #include <cuda.h>
@@ -20,9 +21,9 @@
 
 int main(int argc, char *argv[]){
 
-	TIFF *image;
+	TIFF *image, *img1;
 	unsigned int width, length, row, x, y, offset, column;
-	unsigned short bps, spp;
+	unsigned short bps, spp, pm;
 	float *subtractedimage, *image2f, *dist2pinhole, pinholedist, k;
 	tsize_t scanlinesize;
 
@@ -40,21 +41,22 @@ int main(int argc, char *argv[]){
 		return(1);
 	}
 
-	scanlinesize = TIFFScanlineSize(image);
+	
 	TIFFGetField(image, TIFFTAG_BITSPERSAMPLE, &bps);
 	TIFFGetField(image, TIFFTAG_SAMPLESPERPIXEL, &spp);
 	TIFFGetField(image, TIFFTAG_IMAGEWIDTH, &width);
 	TIFFGetField(image, TIFFTAG_IMAGELENGTH, &length);
+	TIFFGetField(image, TIFFTAG_PHOTOMETRIC, &pm);
 	printf("Image Properties: ");
-	printf("BitsPerSample: %u, SamplesPerPixel: %u, Image Width: %u, Image Length: %u\n", bps, spp, width, length);
+	printf("BitsPerSample: %u, SamplesPerPixel: %u, Image Width: %u, Image Length: %u, Photometric: %u\n", bps, spp, width, length, pm);
 
 
 	printf("This data is actually comprised of two seperate images so we need to split them\n");
-	uint16 *buffer;
-	uint16 *image1, *image2;
+	float *buffer;
+	float *image1, *image2;
 
-	image1 = malloc(width * length * sizeof(uint16));
-	image2 = malloc(width * length * sizeof(uint16));
+	image1 = malloc(width * (length/2) * sizeof(float));
+	image2 = malloc(width * (length/2) * sizeof(float));
 	buffer = _TIFFmalloc(TIFFScanlineSize(image));
 
 	if( image1 == NULL || image2 == NULL || buffer == NULL ){
@@ -66,30 +68,67 @@ int main(int argc, char *argv[]){
 
 	unsigned int height;
 	height = length / 2;
+	scanlinesize = (width * sizeof(float));
 
-	for( row = 0; row < ((length/2)-1); row++){
+	for( row = 0; row < (height); row++){
 		TIFFReadScanline(image,buffer,row,0);
-		for(column = 0; column < width; column++){
-			offset = (row * width) + column;
+		for(column = 0; column < (width - 1); column++){
+			offset = (row * (width)) + column;
 			image1[offset] = buffer[column];
-/*			printf("%hu\n", image1[offset]); */
+/*			printf("%hu\n", image1[offset]);  */
 		}
 	}	      
 
-	for( row = 1040; row < (length - 1); row++){
+	for( row = 1040; row < (length); row++){
 		TIFFReadScanline(image,buffer,row,0);
-		for(column = 0; column < width; column++){
+		for(column = 0; column < (width - 1); column++){
 			offset = ((row - 1040) * width) + column;
-			image2[offset] = buffer[column];
+			image2[offset] = buffer[column]; 
 /*			printf("%hu\n", image2[offset]); */
 		}
 	}
+
+        if((img1 = TIFFOpen("img1.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writeimage(img1, width, height, image1, scanlinesize);
+
+	        if((img1 = TIFFOpen("img2.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writeimage(img1, width, height, image2, scanlinesize);
+
 
 	printf("Now to Subtract the images\n");
 
 	subtractedimage = malloc(width * height * sizeof(float));
 
-	subtractimages(image1, image2, subtractedimage, width, height);
+	subtractimages(image2, image1, subtractedimage, width, height);
+
+		if((img1 = TIFFOpen("asubimage.tiff", "w")) == NULL){
+			printf("Error opening image\n");
+			return(1);
+	}
+	writeimage(img1, width, height, subtractedimage, scanlinesize);
+
+	/* Testing the subtraction */
+	cuComplex *cusubtracted, *ftcusubtracted;
+	ftcusubtracted = malloc(sizeof(cuComplex) * width * height);
+        cusubtracted = malloc(sizeof(cuComplex) * width * height);
+	for(offset = 0; offset < (width * height); offset++){
+		cusubtracted[offset].x = subtractedimage[offset];
+	}
+
+	gpufouriertransform(cusubtracted, ftcusubtracted, width, height);
+
+		if((img1= TIFFOpen("ftsub.tiff", "w"))== NULL){
+			printf("Error opening file \n");
+			return(1);
+	}
+	writeimage(img1, width, height,ftcusubtracted, (width) * sizeof(cuComplex));
+
 
 	image2f = malloc(width * height * sizeof(float));
 
@@ -149,21 +188,28 @@ int main(int argc, char *argv[]){
 
 	gpusubdivref(reducedhologram, subtractedimage, referencewave, width, height);
 
+        if((img1 = TIFFOpen("reducedhologram.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+        }
+        writeimage(img1, width, height, reducedhologram, scanlinesize);
+
 	/* Starting Fourier Transfrom stuff */
 
 	cuComplex *treducedhologram;
 	treducedhologram = malloc(sizeof(cuComplex) * width * height);
 	gpufouriertransform(reducedhologram, treducedhologram, width, height);
-	
-	TIFF* output;
-	
-	if((output = TIFFOpen("/tmp/image.tiff", "w")) == NULL){
-                printf("Error Opening the image\n");
+
+        if((img1 = TIFFOpen("FTReducedHologram.tiff", "w")) == NULL){
+                printf("Error opening image\n");
                 return(1);
         }
+        writeimage(img1, width, height, treducedhologram, scanlinesize);
 
-	writeimage(output, width, height, treducedhologram, scanlinesize);
-
+	char command[500];
+	strcpy(command, "eog img1.tiff img2.tiff asubimage.tiff reducedhologram.tiff FTReducedHologram.tiff &");
+	system(command);
+	
 
 
 	/* Freeing stuff that has been allocated to the host */
