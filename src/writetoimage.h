@@ -1,1 +1,1 @@
-int writeimage(TIFF* image, unsigned int width, unsigned int height, cuComplex *data, tsize_t scanlinesize);
+int writeimage(TIFF* image, unsigned int width, unsigned int height, void *data, tsize_t scanlinesize);
