@@ -9,22 +9,14 @@
 #include <tiffio.h>
 #include <cuComplex.h>
 
-<<<<<<< HEAD
 int writerealimage(TIFF* image, unsigned int width, unsigned int height, cuComplex *data, tsize_t scanlinesize){
 	unsigned int row, offset;
 	uint16 *real;
-=======
-int writeimage(TIFF* image, unsigned int width, unsigned int height, void *data, tsize_t scanlinesize){
-	unsigned int row;
-
-	printf("Writing an image\n");
->>>>>>> bc02b5056dc191a9d2a985d1c43dc343d9e1c91e
 
 	TIFFSetField(image, TIFFTAG_IMAGEWIDTH, width);
 	TIFFSetField(image, TIFFTAG_IMAGELENGTH, height);
-	TIFFSetField(image, TIFFTAG_BITSPERSAMPLE, sizeof(float));
+	TIFFSetField(image, TIFFTAG_BITSPERSAMPLE, 16);
 	TIFFSetField(image, TIFFTAG_SAMPLESPERPIXEL, 1);
-<<<<<<< HEAD
 	TIFFSetField(image, TIFFTAG_PLANARCONFIG, 1);
 	TIFFSetField(image, TIFFTAG_PHOTOMETRIC, 1);
 
@@ -36,7 +28,7 @@ int writeimage(TIFF* image, unsigned int width, unsigned int height, void *data,
 	float big, small;
 	big = 0;
 	small = 0;
-		
+
 	for(offset = 0; offset < (width * height); offset++){
 		if(big < data[offset].x){
 			big = data[offset].x;
@@ -75,26 +67,6 @@ int writeimage(TIFF* image, unsigned int width, unsigned int height, void *data,
 
 	TIFFClose(image);
 
-=======
-	TIFFSetField(image, TIFFTAG_PHOTOMETRIC, 1);
-	TIFFSetField(image, TIFFTAG_PLANARCONFIG, 1);
-	TIFFSetField(image, TIFFTAG_ARTIST,"RobertJames");
-	TIFFSetField(image, TIFFTAG_COMPRESSION, 1);
-	TIFFSetField(image, TIFFTAG_SUBFILETYPE, 1);
-
-	printf("Creating Buffer for each line to be loaded\n");
-
-	float *buffer;
-	buffer = _TIFFmalloc(scanlinesize);
-
-	for(row = 0; row < height; row++){
-		memcpy(buffer, &data[(row*width)].x, (width * sizeof(scanlinesize)));
-		TIFFWriteScanline(image, buffer, row,0);
-	}
-
-	TIFFClose(image);
-	_TIFFfree(buffer);	
->>>>>>> bc02b5056dc191a9d2a985d1c43dc343d9e1c91e
 	return(0);
 }
 
@@ -112,7 +84,7 @@ int writecompleximage(TIFF* image, unsigned int width, unsigned int height, cuCo
         /* cuComplex data  is complex !!! meaning that it has an .x and a .y which are real and imaginary components respectivly need to split them so that it makes sense */
 
         imag = malloc(sizeof(uint16) * width * height);
-	
+
       /* Normalising the image so that the smallest value is equal to 0 and the largest value is equal to the maximum size of an unsigned 16bit integer 0 - 65,535 */
         float big, small;
         big = 0;
@@ -171,10 +143,10 @@ int writeabsimage(TIFF* image, unsigned int width, unsigned int height, cuComple
         TIFFSetField(image, TIFFTAG_SAMPLESPERPIXEL, 1);
         TIFFSetField(image, TIFFTAG_PLANARCONFIG, 1);
         TIFFSetField(image, TIFFTAG_PHOTOMETRIC, 1);
-	
+
 	float *tmp;
 	tmp = malloc(sizeof(float) * width * height);
-	
+
 	float big, small;
         big = 0;
         small = 0;
@@ -217,5 +189,3 @@ int writeabsimage(TIFF* image, unsigned int width, unsigned int height, cuComple
 
         return(0);
 }
-
-

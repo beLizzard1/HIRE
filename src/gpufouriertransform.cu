@@ -113,9 +113,6 @@ extern "C" int gpuifouriertransform(cuComplex *original, cuComplex *transform, u
 
         cudaDeviceSynchronize();
         printf("Allocating Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
-	
-        printf("Performing the FFT Shift\n");
-        fftshift(original, width, height);
 
         cudaMemcpy(gpuoriginal, original, sizeof(cuComplex) * width * height, cudaMemcpyHostToDevice);
 
@@ -127,6 +124,7 @@ extern "C" int gpuifouriertransform(cuComplex *original, cuComplex *transform, u
         cudaMemcpy(transform, gputransform, sizeof(cuComplex) * width * height, cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
         printf("Copying back, Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+
 
 /*
         for(offset = 0; offset < (width * height); offset ++){

@@ -34,12 +34,12 @@ __global__ __launch_bounds__(256, 6) void gpupropagatekernel(cuComplex *gpuholog
 
 	float realcomp, imagcomp, exponent;
 	float kfactor;
-	kfactor = 1 * sqrtf( ((k) * (k)) - ((kxij) * (kxij)) - ((kyij) * (kyij)));
+	kfactor = -1 * sqrtf( ((k) * (k)) - ((kxij) * (kxij)) - ((kyij) * (kyij)));
 	exponent = kfactor * propdist;
 	sincosf(exponent, &imagcomp, &realcomp);
 
-	gpupropagated[offset].x = (gpuhologram[offset].x * realcomp);
-	gpupropagated[offset].y = (gpuhologram[offset].y * imagcomp);
+	gpupropagated[offset].x = (gpuhologram[offset].x * realcomp) - (gpuhologram[offset].y * imagcomp);
+	gpupropagated[offset].y = (gpuhologram[offset].y * realcomp) + (gpuhologram[offset].x * imagcomp);
 
 	__syncthreads();
 
