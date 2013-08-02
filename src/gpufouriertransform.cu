@@ -16,9 +16,9 @@ extern "C" int fftshift(cuComplex *target, unsigned int width, unsigned int heig
 	halfw = width / 2;
 	halfh = height / 2;
 	
-	printf("Break up the image into 4 quadrants and rearranging them\n");
+	//printf("Break up the image into 4 quadrants and rearranging them\n");
 
-	printf("Quadrants 1 & 3\n");
+	//printf("Quadrants 1 & 3\n");
 	for( x = 0; x < halfw; x++){
 		for(y = 0; y < halfh; y++){
 			offset = y * width + x;
@@ -35,7 +35,7 @@ extern "C" int fftshift(cuComplex *target, unsigned int width, unsigned int heig
 			target[tmpoffset].y = tmp13.y;
 		}
 	}
-	printf("Quadrants 2 & 4\n");	
+//	printf("Quadrants 2 & 4\n");
         for( x = 0; x < halfw; x++){
                 for(y = 0; y < halfh; y++){
                         offset = (y+halfh) * width + x;
@@ -62,26 +62,26 @@ extern "C" int gpufouriertransform(cuComplex *original, cuComplex *transform, un
 
 	cuComplex *gpuoriginal, *gputransform;
 
-	printf("Starting the gpu FFT\n");
+	//printf("Starting the gpu FFT\n");
 
 	cudaMalloc(&gpuoriginal, sizeof(cuComplex) * width * height);
 	cudaMalloc(&gputransform, sizeof(cuComplex) * width * height);
 
 	cudaDeviceSynchronize();
-        printf("Allocating Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Allocating Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
 	cudaMemcpy(gpuoriginal, original, sizeof(cuComplex) * width * height, cudaMemcpyHostToDevice);
 
 	cudaDeviceSynchronize();
-        printf("Copying Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Copying Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 	
 	cufftExecC2C(plan,gpuoriginal,gputransform, -1);
 
 	cudaMemcpy(transform, gputransform, sizeof(cuComplex) * width * height, cudaMemcpyDeviceToHost);		
 	cudaDeviceSynchronize();
-        printf("Copying back, Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Copying back, Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
-	printf("Performing the FFT Shift\n");
+	//printf("Performing the FFT Shift\n");
 	
 	fftshift(transform, width, height); 
 /*
@@ -106,24 +106,24 @@ extern "C" int gpuifouriertransform(cuComplex *original, cuComplex *transform, u
 
         cuComplex *gpuoriginal, *gputransform;
 
-        printf("Starting the gpu FFT\n");
+        //printf("Starting the gpu FFT\n");
 
         cudaMalloc(&gpuoriginal, sizeof(cuComplex) * width * height);
         cudaMalloc(&gputransform, sizeof(cuComplex) * width * height);
 
         cudaDeviceSynchronize();
-        printf("Allocating Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Allocating Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
         cudaMemcpy(gpuoriginal, original, sizeof(cuComplex) * width * height, cudaMemcpyHostToDevice);
 
         cudaDeviceSynchronize();
-        printf("Copying Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Copying Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
         cufftExecC2C(plan,gpuoriginal,gputransform, 1);
 
         cudaMemcpy(transform, gputransform, sizeof(cuComplex) * width * height, cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
-        printf("Copying back, Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Copying back, Memory errors (?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
 
 /*

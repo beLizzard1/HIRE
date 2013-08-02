@@ -6,9 +6,10 @@
 #include <cuda.h>
 
 __global__ void gpudistancekernel(float *gpudistance, unsigned int width, unsigned int height, float pinholedist){
-	unsigned int xcoord, ycoord, offset;
-	xcoord = blockIdx.x;
-	ycoord = blockIdx.y;
+
+	int xcoord = blockIdx.x * blockDim.x + threadIdx.x;
+	int ycoord = blockIdx.y * blockDim.y + threadIdx.y;
+	int offset = ycoord * width + xcoord;
 
 	float pixelsize;
 	pixelsize = 6.45;
@@ -26,19 +27,30 @@ __global__ void gpudistancekernel(float *gpudistance, unsigned int width, unsign
 
 extern "C" int gpudistancegrid(float *dist2pinhole,float pinholedist, unsigned int width, unsigned int height){
 
-	dim3 threadsPerBlock(1,1);
-	dim3 numBlock(width/threadsPerBlock.x, height/threadsPerBlock.y);
+	dim3 gridinblocks, blockinthreads;
+	unsigned int totalthreadsperblock;
+
+	blockinthreads.x = width/87;
+	blockinthreads.y = height/65;
+	blockinthreads.z = 1;
+	totalthreadsperblock = blockinthreads.x * blockinthreads.y * blockinthreads.z;
+	if(totalthreadsperblock > 1024){
+		printf("Error in your thread config.\n");
+		return(1);
+	}
+	gridinblocks.x = (width / blockinthreads.x);
+	gridinblocks.y = (height / blockinthreads.y);
 
 	float *gpudistance;
 	cudaMalloc(&gpudistance, sizeof(float) * width * height);
 	
-	gpudistancekernel<<<numBlock, threadsPerBlock>>>(gpudistance, width, height, pinholedist);
+	gpudistancekernel<<<gridinblocks, blockinthreads>>>(gpudistance, width, height, pinholedist);
 	cudaDeviceSynchronize();
-	printf("Errors after running kernel(?): %s\n", cudaGetErrorString(cudaGetLastError()));
+	//printf("Errors after running kernel(?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
 	cudaMemcpy(dist2pinhole, gpudistance, sizeof(float) * width * height, cudaMemcpyDeviceToHost);
 	cudaDeviceSynchronize();
-        printf("Errors after copying data back to host(?): %s\n", cudaGetErrorString(cudaGetLastError()));
+        //printf("Errors after copying data back to host(?): %s\n", cudaGetErrorString(cudaGetLastError()));
 
 	cudaFree(gpudistance);
 	cudaDeviceReset();

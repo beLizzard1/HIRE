@@ -8,7 +8,6 @@
 #include <string.h>
 #include <tiffio.h>
 #include <cuda.h>
-#include <SDL/SDL.h>
 #include <cuComplex.h>
 
 #include <GL/glfw.h>
@@ -18,7 +17,69 @@
 #include "gpurefwavecalc.h"
 #include "gpufouriertransform.h"
 #include "writetoimage.h"
+#define M_PI 3.14159265358979323846264338327
 
+int normalisecucomplex(float *absipropagatedimage, cuComplex *ipropagatedimage, unsigned int width, unsigned int height){
+	unsigned int offset;
+	float max;
+	for(offset = 0; offset < (width * height); offset++){
+				absipropagatedimage[offset] = sqrtf( (ipropagatedimage[offset].x * ipropagatedimage[offset].x) + (ipropagatedimage[offset].y * ipropagatedimage[offset].y));
+				if( max < absipropagatedimage[offset]){
+					max = absipropagatedimage[offset];
+				}
+			}
+
+			for(offset = 0; offset < (width * height); offset++){
+				absipropagatedimage[offset] = absipropagatedimage[offset] / max;
+			}
+return(0);
+}
+void normalise_and_convert_8(float *p, size_t size, unsigned char *out)
+{
+    if(p && out)
+    {
+        size_t i;
+        float max = 0.0;
+        /* Get max value */
+        for(i=0;i<size;i++)
+        {
+            if(p[i] > max)
+                max = p[i];
+        }
+
+        fprintf(stderr, "max value is %f\n", max);
+        if(max > 0.0)
+        {
+            for(i=0;i<size;i++)
+            {
+                float val;
+                unsigned char cv;
+                val = (*p++ / max) * 255.0;
+
+                if(val <= 0.0)
+                {
+                    cv = 0;
+                }
+                else if(val >= 255.0)
+                {
+                    cv = 255;
+                }
+                else
+                {
+                    cv = floor(val);
+                }
+                *out++= cv;
+                *out++= cv;
+                *out++= cv;
+            }
+        }
+        else
+        {
+            /* black buffer */
+            memset(out, 0, size * 3);
+        }
+    }
+}
 
 int main(int argc, char *argv[]){
 
@@ -82,8 +143,6 @@ int main(int argc, char *argv[]){
 		memcpy(&image2[( i - height ) * width], buffer, scanlinesize);
 	}
 
-	free(buffer);
-
 	long *longimg1, *longimg2;
 	float *fimg1, *fimg2;
 
@@ -107,48 +166,45 @@ int main(int argc, char *argv[]){
 	free(longimg1);
 	free(longimg2);
 
-	/* View img1, img2 */
-	cuComplex *cuimg1, *cuimg2;
-	cuimg1 = malloc(sizeof(cuComplex) * width * height);
-	cuimg2 = malloc(sizeof(cuComplex) * width * height);
+    cuComplex *tsub;
+    tsub = malloc(sizeof(cuComplex) * width * height);
 
-	for(offset = 0; offset < (width * height); offset ++){
-		cuimg1[offset].x = fimg1[offset];
-		cuimg2[offset].x = fimg2[offset];
+    for(offset = 0; offset < (width * height); offset++){
+                tsub[offset].x = fimg1[offset] - fimg2[offset];
+                tsub[offset].y = 0;
+    }
+
+	if((output = TIFFOpen("sub.tiff", "w")) == NULL){
+                printf("Error opening image\n");
+                return(1);
+    }
+	writerealimage(output, width, height, tsub, scanlinesize);
+
+//	Now we need to expand the size of the subtracted image by a factor t
+	int scalefactor = 1;
+	unsigned int newwidth, newheight, oldoffset;
+	newwidth = scalefactor * width;
+	newheight = (scalefactor * height);
+	cuComplex *sub;
+	sub = malloc(sizeof(cuComplex) * newwidth * newheight);
+
+	for(unsigned int x = 0; x < newwidth; x++){
+		for(unsigned int y = 0; y < newheight; y++){
+			oldoffset = width * floor((y / scalefactor)) + floor((x / scalefactor));
+			offset = newwidth * y + x;
+
+			sub[offset].x = tsub[oldoffset].x;
+			sub[offset].y = tsub[oldoffset].y;
+			}
 	}
+	free(tsub);
 
-	        if((output = TIFFOpen("img1.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writerealimage(output, width, height, cuimg1, scanlinesize);
-
-                if((output = TIFFOpen("img2.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writerealimage(output, width, height, cuimg2, scanlinesize);
-
-	free(cuimg1);
-	free(cuimg2);
-
-
-        cuComplex *sub;
-        sub = malloc(sizeof(cuComplex) * width * height);
-
-        for(offset = 0; offset < (width * height); offset++){
-                sub[offset].x = fimg1[offset] - fimg2[offset];
-                sub[offset].y = 0;
-        }
-
-		if((output = TIFFOpen("sub.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-	writerealimage(output, width, height, sub, scanlinesize);
+//	Now ensuring that things don't break changing the values of width & height to reflect the expanded matrices
+	width = newwidth;
+	height = newheight;
 
 	/* Calculating the mean value of the subtracted image and subtract it */
-	float sum;
+	float sum = 0;
 	for(offset = 0; offset < (width * height); offset++){
 		sum += sub[offset].x;	
 	}
@@ -157,42 +213,16 @@ int main(int argc, char *argv[]){
 	for(offset = 0; offset < (width * height); offset++){
 		sub[offset].x -= sum;
 	}
-                if((output = TIFFOpen("meansubtractedsub.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writerealimage(output, width, height, sub, scanlinesize);
-
-
-
-	free(fimg1);
+   	free(fimg1);
 	free(fimg2);
 
-	pinholedist = 57000; /* Distance to the central pixel of the sensor in micron */
+	pinholedist = 57738; /* Distance to the central pixel of the sensor in micron */
 
 	cuComplex *referencewave;
 
 	referencewave = malloc(sizeof(cuComplex) * width * height);	
 
 	gpurefwavecalc(referencewave, width, height, pinholedist,k,pixelsize);
-
-        if((output = TIFFOpen("referencewave/realrefresult.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writerealimage(output, width, height, referencewave, scanlinesize);
-
-	        if((output = TIFFOpen("referencewave/imagrefresult.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-	writecompleximage(output, width, height, referencewave, scanlinesize);
-                if((output = TIFFOpen("referencewave/absrefresult.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writeabsimage(output, width, height, referencewave, scanlinesize);
-
 
 
 	/* Dividing the Subtracted Image by the Reference Wave */
@@ -208,78 +238,17 @@ int main(int argc, char *argv[]){
 
 	}
 
-	        if((output = TIFFOpen("reducedhologram/realreducedhologram.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-	writerealimage(output, width, height, reducedhologram, scanlinesize);
-
-		        if((output = TIFFOpen("reducedhologram/imagreducedhologram.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-	writecompleximage(output, width, height, reducedhologram, scanlinesize);
-
-                if((output = TIFFOpen("reducedhologram/absreducedhologram.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writeabsimage(output, width, height, reducedhologram, scanlinesize);
-
-
-
 	/* Starting Fourier Transform stuff */
 
 	cuComplex *tredhologram;
 	tredhologram = malloc(sizeof(cuComplex) * width * height);
 	gpufouriertransform(reducedhologram, tredhologram, width, height);
 
-//	printf("Writing the output.tiff\n");
-
-	if((output = TIFFOpen("fftreducedhologram/result.tiff", "w")) == NULL){
-		printf("Error opening image\n");
-		return(1);
-	}
-	writerealimage(output, width, height, tredhologram, scanlinesize);
-
-	if((output = TIFFOpen("fftreducedhologram/resultimag.tiff", "w")) == NULL){
-		printf("Error opening image \n");
-		return(1);
-	}
-	writecompleximage(output, width, height, tredhologram, scanlinesize);
-
-	if((output = TIFFOpen("fftreducedhologram/abs.tiff","w")) == NULL){
-		printf("Error opening the image\n");
-		return(1);
-	}
-	writeabsimage(output, width, height, tredhologram, scanlinesize);
-
 
  	/* Doing another fourier transform, to see if the input and output are the same */
 	cuComplex *itredhologram;
 	itredhologram = malloc(sizeof(cuComplex) * width * height);
 	gpuifouriertransform(tredhologram, itredhologram, width, height);
-
-        if((output = TIFFOpen("ifftreducedhologram/realifftresult.tiff", "w")) == NULL){
-                printf("Error opening image\n");
-                return(1);
-        }
-        writerealimage(output, width, height, itredhologram, scanlinesize);
-
-        if((output = TIFFOpen("ifftreducedhologram/imagifftresult.tiff", "w")) == NULL){
-                printf("Error opening image \n");
-                return(1);
-        }
-        writecompleximage(output, width, height, itredhologram, scanlinesize);
-
-	if((output = TIFFOpen("ifftreducedhologram/absifftresult.tiff", "w")) == NULL){
-                printf("Error opening image \n");
-                return(1);
-        }
-	writeabsimage(output, width, height, itredhologram, scanlinesize);
-
-
-
 
 	/* Propagating the transformed image */
 	cuComplex *propagatedimage, *ipropagatedimage;
@@ -289,71 +258,77 @@ int main(int argc, char *argv[]){
 	absipropagatedimage = malloc(sizeof(float) * width * height);
 	float dist, maxdist;
 	char absdist[50];
-	maxdist = 120000;
+	unsigned char *rgbbuffer;
+	maxdist = pinholedist;
+
+	rgbbuffer = malloc(sizeof(unsigned char)* width * height * 3);
 
 	/* GLFW Interface Stuff */
-	int running = GL_TRUE;
+
 	if(!glfwInit()){
 		exit(EXIT_FAILURE);
 	}
-	if(!glfwOpenWindow(width/2,0,0,0,0,0,0,0, GLFW_WINDOW)){
+
+	if(!glfwOpenWindow(width,height,0,0,0,0,0,0, GLFW_WINDOW)){
 		glfwTerminate();
 		exit(EXIT_FAILURE);
 	}
+	int windowwidth, windowheight;
 
-	float max;
 	/* Propagation Loop */
-	glClearColor(0,0,0,0);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glOrtho(0.0, 1.0, 0.0, 1.0, -1.0, 1.0);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	GLuint tex_id = 0;  glGenTextures(1, &tex_id);
 
-	while(running){
-		glClear(GL_COLOR_BUFFER_BIT);
-		for(dist = 30000; dist < maxdist; dist = dist + planeseparation){
-		snprintf( absdist, 50, "PropagatedDistance: %f \316 \274 m", dist);
+	while(dist < maxdist){
+	glfwGetWindowSize(&windowwidth, &windowheight);
+	glViewport(0, 0, windowwidth, windowheight);
+
+	/* Propagation Loop */
+	for(dist = 30000; dist <= maxdist; dist = dist + planeseparation){
+
+		snprintf( absdist, 50, "PropagatedDistance: %f micron", dist);
 		glfwSetWindowTitle(absdist);	
-		gpupropagate(tredhologram, propagatedimage, width, height, k, pixelsize,dist, scanlinesize);
-
+		gpupropagate(tredhologram, propagatedimage, width, height, k, pixelsize,dist, scanlinesize, scalefactor);
 		gpuifouriertransform(propagatedimage, ipropagatedimage, width, height);
 
 		for(offset = 0; offset < (width * height); offset++){
-			absipropagatedimage[offset] = sqrtf( (ipropagatedimage[offset].x * ipropagatedimage[offset].x) + (ipropagatedimage[offset].y * ipropagatedimage[offset].y));
-			if( max < absipropagatedimage[offset] ){
-				max = absipropagatedimage[offset];
-			}
-		}	
-
-		for(offset = 0; offset < (width * height); offset++){
-			absipropagatedimage[offset] = absipropagatedimage[offset] / max;
+		absipropagatedimage[offset] = sqrtf( (ipropagatedimage[offset].x * ipropagatedimage[offset].x) + (ipropagatedimage[offset].y * ipropagatedimage[offset].y));
 		}
 
+		normalise_and_convert_8(absipropagatedimage, width * height, rgbbuffer);
 
+		glBindTexture(GL_TEXTURE_2D, tex_id);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, 3, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, rgbbuffer);
 
-		glDrawPixels(width, height, GL_LUMINANCE, GL_FLOAT, absipropagatedimage);
+		/* Drawing the results in opengl */
+		glDisable(GL_LIGHTING);
+		glDisable(GL_CULL_FACE);
+		glDisable(GL_DEPTH_TEST);
+		glEnable(GL_TEXTURE_2D);
+		glTexImage2D(GL_TEXTURE_2D, 0, 3, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, rgbbuffer);
+
+		glBegin(GL_TRIANGLE_STRIP);
+
+		glTexCoord2f(0,0); glVertex3f(0,0,0); glTexCoord2f(1,0); glVertex3f(1,0,0); glTexCoord2f(0,1);
+		glVertex3f(0,1,0); glTexCoord2f(1,1); glVertex3f(1,1,0);
+
+		glEnd();
 
 		glfwSwapBuffers();
-
-		running = !glfwGetKey( GLFW_KEY_ESC ) && glfwGetWindowParam(GLFW_OPENED);
 	}
-/*
-        if((output = TIFFOpen(absdist,"w")) == NULL){
-                printf("Error opening the image\n");
-                return(1);
-        }
-        writeabsimage(output, width, height, ipropagatedimage, scanlinesize);
-*/
+}
 
-	}	
-
-
-	cudaDeviceReset();
 	glfwTerminate();
 
 	/* Freeing stuff that has been allocated to the host */
-/*	free(subtractedimage);
-	free(dist2pinhole);
-	free(referencewave);
-	free(reducedhologram);
+
 	_TIFFfree(buffer);
 	TIFFClose(image);
-*/	
+
 	return(0);
 }
