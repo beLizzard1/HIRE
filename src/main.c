@@ -19,22 +19,7 @@
 #include "writetoimage.h"
 #define M_PI 3.14159265358979323846264338327
 
-int normalisecucomplex(float *absipropagatedimage, cuComplex *ipropagatedimage, unsigned int width, unsigned int height){
-	unsigned int offset;
-	float max;
-	for(offset = 0; offset < (width * height); offset++){
-				absipropagatedimage[offset] = sqrtf( (ipropagatedimage[offset].x * ipropagatedimage[offset].x) + (ipropagatedimage[offset].y * ipropagatedimage[offset].y));
-				if( max < absipropagatedimage[offset]){
-					max = absipropagatedimage[offset];
-				}
-			}
-
-			for(offset = 0; offset < (width * height); offset++){
-				absipropagatedimage[offset] = absipropagatedimage[offset] / max;
-			}
-return(0);
-}
-void normalise_and_convert_8(float *p, size_t size, unsigned char *out)
+void normalise_and_convert_8(float *p, size_t size,float scale, unsigned char *out)
 {
     if(p && out)
     {
@@ -54,7 +39,7 @@ void normalise_and_convert_8(float *p, size_t size, unsigned char *out)
             {
                 float val;
                 unsigned char cv;
-                val = (*p++ / max) * 255.0;
+                val = (*p++ / max) * 255.0 * scale;
 
                 if(val <= 0.0)
                 {
@@ -181,7 +166,7 @@ int main(int argc, char *argv[]){
 	writerealimage(output, width, height, tsub, scanlinesize);
 
 //	Now we need to expand the size of the subtracted image by a factor t
-	int scalefactor = 1;
+	int scalefactor = 2;
 	unsigned int newwidth, newheight, oldoffset;
 	newwidth = scalefactor * width;
 	newheight = (scalefactor * height);
@@ -276,6 +261,7 @@ int main(int argc, char *argv[]){
 	int windowwidth, windowheight;
 
 	/* Propagation Loop */
+	float scale = 1;
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	glOrtho(0.0, 1.0, 0.0, 1.0, -1.0, 1.0);
@@ -284,11 +270,21 @@ int main(int argc, char *argv[]){
 	GLuint tex_id = 0;  glGenTextures(1, &tex_id);
 
 	while(dist < maxdist){
+	glfwPollEvents();
 	glfwGetWindowSize(&windowwidth, &windowheight);
 	glViewport(0, 0, windowwidth, windowheight);
 
 	/* Propagation Loop */
 	for(dist = 30000; dist <= maxdist; dist = dist + planeseparation){
+		glfwSwapBuffers();
+		if(glfwGetKey(GLFW_KEY_KP_ADD)){
+			printf("Increasing the Brightness\n");
+	        scale*= 1.25;
+		}
+		if(glfwGetKey(GLFW_KEY_KP_SUBTRACT)){
+			printf("Reducing the Brightness\n");
+			scale/= 1.25;
+		}
 
 		snprintf( absdist, 50, "PropagatedDistance: %f micron", dist);
 		glfwSetWindowTitle(absdist);	
@@ -299,7 +295,7 @@ int main(int argc, char *argv[]){
 		absipropagatedimage[offset] = sqrtf( (ipropagatedimage[offset].x * ipropagatedimage[offset].x) + (ipropagatedimage[offset].y * ipropagatedimage[offset].y));
 		}
 
-		normalise_and_convert_8(absipropagatedimage, width * height, rgbbuffer);
+		normalise_and_convert_8(absipropagatedimage, width * height,scale, rgbbuffer);
 
 		glBindTexture(GL_TEXTURE_2D, tex_id);
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
